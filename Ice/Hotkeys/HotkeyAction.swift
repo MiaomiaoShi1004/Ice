@@ -2,6 +2,7 @@
 //  HotkeyAction.swift
 //  Ice
 //
+import Foundation
 
 enum HotkeyAction: String, Codable, CaseIterable {
     case toggleHiddenSection = "ToggleHiddenSection"
@@ -39,4 +40,9 @@ enum HotkeyAction: String, Codable, CaseIterable {
             await appState.menuBarManager.searchPanel.toggle()
         }
     }
+}
+
+struct HotkeyItem: Identifiable {
+    let id = UUID()  // Unique ID for each hotkey item
+    let action: HotkeyAction
 }

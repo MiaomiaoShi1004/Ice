@@ -70,6 +70,21 @@ struct IceSection<Header: View, Content: View, Footer: View>: View {
             content()
         }
     }
+    // For Temporarily show individual menu bar items
+    init(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder footer: () -> Footer
+    ) where Header == Text {
+        self.init {
+            Text(title)
+                .font(.headline)
+        } content: {
+            content()
+        } footer: {
+            footer()
+        }
+    }
 
     var body: some View {
         IceGroupBox(padding: spacing) {
@@ -90,11 +105,10 @@ private struct IceSectionLayout: _VariadicView_UnaryViewRoot {
 
     @ViewBuilder
     func body(children: _VariadicView.Children) -> some View {
-        let last = children.last?.id
         VStack(alignment: .leading, spacing: spacing) {
-            ForEach(children) { child in
+            ForEach(Array(children.enumerated()), id: \.element.id) { index, child in
                 child
-                if child.id != last {
+                if index != children.count - 1 {
                     Divider()
                 }
             }

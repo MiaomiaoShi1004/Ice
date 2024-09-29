@@ -7,7 +7,7 @@ import SwiftUI
 
 struct HotkeysSettingsPane: View {
     @EnvironmentObject var appState: AppState
-
+    @State private var hotkeyActions: [HotkeyItem] = [HotkeyItem(action: .searchMenuBarItems)]
     private var hotkeySettingsManager: HotkeySettingsManager {
         appState.settingsManager.hotkeySettingsManager
     }
@@ -24,6 +24,20 @@ struct HotkeysSettingsPane: View {
             IceSection("Other") {
                 hotkeyRecorder(forAction: .toggleApplicationMenus)
                 hotkeyRecorder(forAction: .showSectionDividers)
+            }
+            IceSection("Temporarily show individual menu bar items") {
+                ForEach(hotkeyActions) { hotkeyItem in
+                    hotkeyRecorder(forAction: hotkeyItem.action)
+                }
+            } footer: {
+                HStack {
+                    Spacer()
+                    Button("Add in item") {
+                        // Add a new unique item
+                        hotkeyActions.append(HotkeyItem(action: .showSectionDividers))
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         }
     }
