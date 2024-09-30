@@ -5,16 +5,16 @@
 
 import SwiftUI
 
-struct HotkeyRecorder<Label: View>: View {
+struct HotkeyRecorderView<Label: View>: View {
     @StateObject private var model: HotkeyRecorderModel
 
     private let label: Label
-
+// MARK: - UI for List item in HotKeys Panel
     init(hotkey: Hotkey, @ViewBuilder label: () -> Label) {
         self._model = StateObject(wrappedValue: HotkeyRecorderModel(hotkey: hotkey))
         self.label = label()
     }
-
+// UI for Record Hotkey and record circle button
     var body: some View {
         IceLabeledContent {
             HStack(spacing: 1) {
@@ -40,7 +40,6 @@ struct HotkeyRecorder<Label: View>: View {
             }
         }
     }
-
     @ViewBuilder
     private var leadingSegment: some View {
         Button {

@@ -53,7 +53,7 @@ struct SettingsView: View {
         case .menuBarAppearance:
             MenuBarAppearanceSettingsPane()
         case .hotkeys:
-            HotkeysSettingsPane()
+            HotkeysSettingsPaneView()
         case .advanced:
             AdvancedSettingsPane()
         case .updates:

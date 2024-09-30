@@ -5,9 +5,9 @@
 
 import SwiftUI
 
-struct HotkeysSettingsPane: View {
+struct HotkeysSettingsPaneView: View {
     @EnvironmentObject var appState: AppState
-    @State private var hotkeyActions: [HotkeyItem] = [HotkeyItem(action: .searchMenuBarItems)]
+    @State private var hotkeyActions: [HotkeyItem] = [HotkeyItem(action: .tempShowSelectedItem)]
     private var hotkeySettingsManager: HotkeySettingsManager {
         appState.settingsManager.hotkeySettingsManager
     }
@@ -34,7 +34,7 @@ struct HotkeysSettingsPane: View {
                     Spacer()
                     Button("Add in item") {
                         // Add a new unique item
-                        hotkeyActions.append(HotkeyItem(action: .showSectionDividers))
+                        hotkeyActions.append(HotkeyItem(action: .tempShowSelectedItem))
                     }
                     .buttonStyle(.bordered)
                 }
@@ -45,7 +45,7 @@ struct HotkeysSettingsPane: View {
     @ViewBuilder
     private func hotkeyRecorder(forAction action: HotkeyAction) -> some View {
         if let hotkey = hotkeySettingsManager.hotkey(withAction: action) {
-            HotkeyRecorder(hotkey: hotkey) {
+            HotkeyRecorderView(hotkey: hotkey) {
                 switch action {
                 case .toggleHiddenSection:
                     Text("Toggle the hidden section")
@@ -57,6 +57,11 @@ struct HotkeysSettingsPane: View {
                     Text("Show section dividers")
                 case .searchMenuBarItems:
                     Text("Search menu bar items")
+                case .tempShowSelectedItem:
+                    HStack {
+                        Image(systemName: "house")
+                        Text("displayName")
+                    }
                 }
             }
         }

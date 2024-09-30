@@ -324,6 +324,7 @@ private struct BottomBarButton<Content: View>: View {
     }
 }
 
+// MARK: - Search Panel Footer
 private struct SettingsButton: View {
     let action: () -> Void
 
@@ -367,6 +368,7 @@ private struct ShowItemButton: View {
     }
 }
 
+// MARK: - Reuse Control Center Icon
 private let controlCenterIcon: NSImage? = {
     guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first else {
         return nil
@@ -400,7 +402,7 @@ private struct MenuBarSearchItemView: View {
             item.owningApplication?.icon
         }
     }
-
+// MARK: - View for each item in search panel
     var body: some View {
         HStack {
             if let appIcon {

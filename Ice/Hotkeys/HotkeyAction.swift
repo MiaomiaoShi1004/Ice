@@ -10,6 +10,7 @@ enum HotkeyAction: String, Codable, CaseIterable {
     case toggleApplicationMenus = "ToggleApplicationMenus"
     case showSectionDividers = "ShowSectionDividers"
     case searchMenuBarItems = "SearchMenuBarItems"
+    case tempShowSelectedItem = "TempShowSelectedItem"
 
     @MainActor
     func perform(appState: AppState) async {
@@ -38,6 +39,8 @@ enum HotkeyAction: String, Codable, CaseIterable {
             appState.settingsManager.advancedSettingsManager.showSectionDividers.toggle()
         case .searchMenuBarItems:
             await appState.menuBarManager.searchPanel.toggle()
+        case .tempShowSelectedItem:
+            print("DEBUG: tempShowItemCase written here")
         }
     }
 }
