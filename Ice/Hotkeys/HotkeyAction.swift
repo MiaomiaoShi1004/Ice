@@ -3,6 +3,7 @@
 //  Ice
 //
 import Foundation
+import SwiftUI
 
 enum HotkeyAction: String, Codable, CaseIterable {
     case toggleHiddenSection = "ToggleHiddenSection"
@@ -48,4 +49,10 @@ enum HotkeyAction: String, Codable, CaseIterable {
 struct HotkeyItem: Identifiable {
     let id = UUID()  // Unique ID for each hotkey item
     let action: HotkeyAction
+}
+
+struct AppItem: Identifiable {
+    let id = UUID()
+    var appIcon: NSImage
+    var name: String
 }

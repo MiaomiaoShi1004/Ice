@@ -8,6 +8,7 @@ import SwiftUI
 struct HotkeysSettingsPaneView: View {
     @EnvironmentObject var appState: AppState
     @State private var hotkeyActions: [HotkeyItem] = [HotkeyItem(action: .tempShowSelectedItem)]
+    @ObservedObject var tempShowAppManager = TempShowAppManager()
     private var hotkeySettingsManager: HotkeySettingsManager {
         appState.settingsManager.hotkeySettingsManager
     }
@@ -60,7 +61,7 @@ struct HotkeysSettingsPaneView: View {
                 case .tempShowSelectedItem:
                     HStack {
                         Image(systemName: "house")
-                        Text("displayName")
+                        Text("displayAppName")
                     }
                 }
             }
