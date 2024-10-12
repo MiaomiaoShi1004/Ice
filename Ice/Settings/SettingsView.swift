@@ -7,6 +7,34 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var navigationState: AppNavigationState
+    @Environment(\.sidebarRowSize) var sidebarRowSize
+
+    private var sidebarWidth: CGFloat {
+        switch sidebarRowSize {
+        case .small: 190
+        case .medium: 210
+        case .large: 230
+        @unknown default: 210
+        }
+    }
+
+    private var sidebarItemHeight: CGFloat {
+        switch sidebarRowSize {
+        case .small: 26
+        case .medium: 32
+        case .large: 34
+        @unknown default: 32
+        }
+    }
+
+    private var sidebarItemFontSize: CGFloat {
+        switch sidebarRowSize {
+        case .small: 13
+        case .medium: 15
+        case .large: 16
+        @unknown default: 15
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -15,12 +43,6 @@ struct SettingsView: View {
             detailView
         }
         .navigationTitle(navigationState.settingsNavigationIdentifier.localized)
-        .frame(minWidth: 825, minHeight: 500)
-        .background {
-            VisualEffectView(material: .contentBackground, blendingMode: .behindWindow)
-                .opacity(0.25)
-                .blendMode(.softLight)
-        }
     }
 
     @ViewBuilder
@@ -40,7 +62,7 @@ struct SettingsView: View {
         }
         .scrollDisabled(true)
         .removeSidebarToggle()
-        .navigationSplitViewColumnWidth(210)
+        .navigationSplitViewColumnWidth(sidebarWidth)
     }
 
     @ViewBuilder
@@ -67,12 +89,12 @@ struct SettingsView: View {
     private func sidebarItem(for identifier: SettingsNavigationIdentifier) -> some View {
         Label {
             Text(identifier.localized)
-                .font(.title3)
+                .font(.system(size: sidebarItemFontSize))
                 .padding(.leading, 2)
         } icon: {
             icon(for: identifier).view
         }
-        .frame(height: 32)
+        .frame(height: sidebarItemHeight)
     }
 
     private func icon(for identifier: SettingsNavigationIdentifier) -> IconResource {

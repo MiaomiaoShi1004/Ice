@@ -7,6 +7,19 @@ import CoreGraphics
 
 /// A namespace for mouse cursor operations.
 enum MouseCursor {
+    /// A coordinate space for mouse cursor operations.
+    enum CoordinateSpace {
+        /// The coordinate space used by the `AppKit` framework.
+        ///
+        /// The origin of this coordinate space is at the bottom left corner of the screen.
+        case appKit
+
+        /// The coordinate space used by the `CoreGraphics` framework.
+        ///
+        /// The origin of this coordinate space is at the top left corner of the screen.
+        case coreGraphics
+    }
+
     /// Hides the mouse cursor and increments the hide cursor count.
     static func hide() {
         let result = CGDisplayHideCursor(CGMainDisplayID())
@@ -35,18 +48,15 @@ enum MouseCursor {
 
     /// Returns the location of the mouse pointer.
     ///
-    /// If `flipped` is `true`, the coordinate system of the returned location
-    /// is relative to the top left corner of the screen, and is compatible with
-    /// the coordinate system used by the `CoreGraphics` framework. Otherwise,
-    /// the coordinate system of the returned location is relative to the bottom
-    /// left corner of the screen, and is compatible with coordinate system used
-    /// by the `AppKit` framework.
-    static func location(flipped: Bool) -> CGPoint? {
+    /// - Parameter coordinateSpace: The coordinate space of the returned location. See
+    ///   the constants defined in ``MouseCursor/CoordinateSpace`` for more information.
+    static func location(in coordinateSpace: CoordinateSpace) -> CGPoint? {
         CGEvent(source: nil).map { event in
-            if flipped {
-                event.location
-            } else {
+            switch coordinateSpace {
+            case .appKit:
                 event.unflippedLocation
+            case .coreGraphics:
+                event.location
             }
         }
     }

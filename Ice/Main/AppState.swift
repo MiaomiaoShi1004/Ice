@@ -12,6 +12,9 @@ final class AppState: ObservableObject {
     /// A Boolean value that indicates whether the active space is fullscreen.
     @Published private(set) var isActiveSpaceFullscreen = Bridging.isSpaceFullscreen(Bridging.activeSpaceID)
 
+    /// Manager for the menu bar's appearance.
+    private(set) lazy var appearanceManager = MenuBarAppearanceManager(appState: self)
+
     /// Manager for events received by the app.
     private(set) lazy var eventManager = EventManager(appState: self)
 
@@ -27,14 +30,17 @@ final class AppState: ObservableObject {
     /// Manager for the app's settings.
     private(set) lazy var settingsManager = SettingsManager(appState: self)
 
+    /// Manager for app updates.
+    private(set) lazy var updatesManager = UpdatesManager(appState: self)
+
+    /// Manager for user notifications.
+    private(set) lazy var userNotificationManager = UserNotificationManager(appState: self)
+
     /// Global cache for menu bar item images.
     private(set) lazy var imageCache = MenuBarItemImageCache(appState: self)
 
     /// Manager for menu bar item spacing.
     let spacingManager = MenuBarItemSpacingManager()
-
-    /// Manager for app updates.
-    let updatesManager = UpdatesManager()
 
     /// Model for app-wide navigation.
     let navigationState = AppNavigationState()
@@ -75,23 +81,24 @@ final class AppState: ObservableObject {
         set { Bridging.setConnectionProperty(newValue, forKey: "SetsCursorInBackground") }
     }
 
+    /// Configures the internal observers for the app state.
     private func configureCancellables() {
         var c = Set<AnyCancellable>()
 
         Publishers.Merge3(
             NSWorkspace.shared.notificationCenter
                 .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
-                .replace(with: ()),
+                .mapToVoid(),
             // Frontmost application change can indicate a space change from one display to
             // another, which gets ignored by NSWorkspace.activeSpaceDidChangeNotification.
             NSWorkspace.shared
                 .publisher(for: \.frontmostApplication)
-                .replace(with: ()),
+                .mapToVoid(),
             // Clicking into a fullscreen space from another space is also ignored.
             UniversalEventMonitor
                 .publisher(for: .leftMouseDown)
                 .delay(for: 0.1, scheduler: DispatchQueue.main)
-                .replace(with: ())
+                .mapToVoid()
         )
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
@@ -114,7 +121,7 @@ final class AppState: ObservableObject {
 
         if let settingsWindow {
             settingsWindow.publisher(for: \.isVisible)
-                .receive(on: DispatchQueue.main)
+                .debounce(for: 0.05, scheduler: DispatchQueue.main)
                 .sink { [weak self] isVisible in
                     guard let self else {
                         return
@@ -168,14 +175,18 @@ final class AppState: ObservableObject {
         cancellables = c
     }
 
+    /// Sets up the app state.
     func performSetup() {
         configureCancellables()
         permissionsManager.stopAllChecks()
         menuBarManager.performSetup()
+        appearanceManager.performSetup()
         eventManager.performSetup()
         settingsManager.performSetup()
         itemManager.performSetup()
         imageCache.performSetup()
+        updatesManager.performSetup()
+        userNotificationManager.performSetup()
     }
 
     /// Assigns the app delegate to the app state.
@@ -291,5 +302,6 @@ extension AppState: BindingExposable { }
 
 // MARK: - Logger
 private extension Logger {
+    /// The logger to use for the app state.
     static let appState = Logger(category: "AppState")
 }

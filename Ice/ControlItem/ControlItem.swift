@@ -81,8 +81,8 @@ final class ControlItem {
         statusItem.isVisible
     }
 
-    /// Creates a control item with the given identifier.
-    init(identifier: Identifier) {
+    /// Creates a control item with the given identifier and app state.
+    init(identifier: Identifier, appState: AppState) {
         let autosaveName = identifier.rawValue
 
         // If the status item doesn't have a preferred position, set it
@@ -101,6 +101,7 @@ final class ControlItem {
         self.statusItem = NSStatusBar.system.statusItem(withLength: 0)
         self.statusItem.autosaveName = autosaveName
         self.identifier = identifier
+        self.appState = appState
 
         // This could break in a new macOS release, but we need this constraint in order to be
         // able to hide the control item when the `ShowSectionDividers` setting is disabled. A
@@ -461,7 +462,7 @@ final class ControlItem {
                 continue
             }
             let item = NSMenuItem(
-                title: "\(section.isHidden ? "Show" : "Hide") the \(name.menuString) Section",
+                title: "\(section.isHidden ? "Show" : "Hide") the \(name.displayString) Section",
                 action: #selector(toggleMenuBarSection),
                 keyEquivalent: ""
             )
@@ -533,26 +534,10 @@ final class ControlItem {
 
     /// Opens the settings window and checks for app updates.
     @objc private func checkForUpdates() {
-        guard
-            let appState,
-            let appDelegate = appState.appDelegate
-        else {
+        guard let appState else {
             return
         }
-        // Open the settings window in case an alert needs to be displayed.
-        appDelegate.openSettingsWindow()
         appState.updatesManager.checkForUpdates()
-    }
-
-    /// Assigns the app state to the control item.
-    func assignAppState(_ appState: AppState) {
-        guard self.appState == nil else {
-            Logger.controlItem.warning("Multiple attempts made to assign app state")
-            return
-        }
-        self.appState = appState
-        configureCancellables()
-        updateStatusItem(with: state)
     }
 
     /// Adds the control item to the menu bar.

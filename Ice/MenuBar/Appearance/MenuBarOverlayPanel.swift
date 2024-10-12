@@ -178,10 +178,10 @@ final class MenuBarOverlayPanel: NSPanel {
         Publishers.Merge(
             publisher(for: \.isOnActiveSpace)
                 .receive(on: DispatchQueue.main)
-                .replace(with: ()),
+                .mapToVoid(),
             UniversalEventMonitor.publisher(for: .leftMouseUp)
                 .filter { [weak self] _ in self?.isOnActiveSpace ?? false }
-                .replace(with: ())
+                .mapToVoid()
         )
         .debounce(for: 0.05, scheduler: DispatchQueue.main)
         .sink { [weak self] in
@@ -323,7 +323,7 @@ final class MenuBarOverlayPanel: NSPanel {
             return
         }
 
-        guard appState.menuBarManager.appearanceManager.overlayPanels.contains(self) else {
+        guard appState.appearanceManager.overlayPanels.contains(self) else {
             Logger.overlayPanel.warning("Overlay panel \(self) not retained")
             return
         }
@@ -377,7 +377,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
 
         if let overlayPanel {
             if let appState = overlayPanel.appState {
-                appState.menuBarManager.appearanceManager.$configuration
+                appState.appearanceManager.$configuration
                     .removeDuplicates()
                     .assign(to: &$configuration)
 
@@ -448,16 +448,20 @@ private final class MenuBarOverlayPanelContentView: NSView {
 
     /// Returns a path in the given rectangle, with the given end caps,
     /// and inset by the given amounts.
-    private func shapePath(in rect: CGRect, leadingEndCap: MenuBarEndCap, trailingEndCap: MenuBarEndCap) -> NSBezierPath {
-        let insetRect: CGRect = switch (leadingEndCap, trailingEndCap) {
-        case (.square, .square):
-            CGRect(x: rect.origin.x, y: rect.origin.y + 1, width: rect.width, height: rect.height - 2)
-        case (.square, .round):
-            CGRect(x: rect.origin.x, y: rect.origin.y + 1, width: rect.width - 1, height: rect.height - 2)
-        case (.round, .square):
-            CGRect(x: rect.origin.x + 1, y: rect.origin.y + 1, width: rect.width - 1, height: rect.height - 2)
-        case (.round, .round):
-            CGRect(x: rect.origin.x + 1, y: rect.origin.y + 1, width: rect.width - 2, height: rect.height - 2)
+    private func shapePath(in rect: CGRect, leadingEndCap: MenuBarEndCap, trailingEndCap: MenuBarEndCap, screen: NSScreen) -> NSBezierPath {
+        let insetRect: CGRect = if !screen.hasNotch {
+            switch (leadingEndCap, trailingEndCap) {
+            case (.square, .square):
+                CGRect(x: rect.origin.x, y: rect.origin.y + 1, width: rect.width, height: rect.height - 2)
+            case (.square, .round):
+                CGRect(x: rect.origin.x, y: rect.origin.y + 1, width: rect.width - 1, height: rect.height - 2)
+            case (.round, .square):
+                CGRect(x: rect.origin.x + 1, y: rect.origin.y + 1, width: rect.width - 1, height: rect.height - 2)
+            case (.round, .round):
+                CGRect(x: rect.origin.x + 1, y: rect.origin.y + 1, width: rect.width - 2, height: rect.height - 2)
+            }
+        } else {
+            rect
         }
 
         let shapeBounds = CGRect(
@@ -496,7 +500,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
 
     /// Returns a path for the ``MenuBarShapeKind/full`` shape kind.
     private func pathForFullShape(in rect: CGRect, info: MenuBarFullShapeInfo, isInset: Bool, screen: NSScreen) -> NSBezierPath {
-        guard let appearanceManager = overlayPanel?.appState?.menuBarManager.appearanceManager else {
+        guard let appearanceManager = overlayPanel?.appState?.appearanceManager else {
             return NSBezierPath()
         }
         var rect = rect
@@ -514,13 +518,14 @@ private final class MenuBarOverlayPanelContentView: NSView {
         return shapePath(
             in: rect,
             leadingEndCap: info.leadingEndCap,
-            trailingEndCap: info.trailingEndCap
+            trailingEndCap: info.trailingEndCap,
+            screen: screen
         )
     }
 
     /// Returns a path for the ``MenuBarShapeKind/split`` shape kind.
     private func pathForSplitShape(in rect: CGRect, info: MenuBarSplitShapeInfo, isInset: Bool, screen: NSScreen) -> NSBezierPath {
-        guard let appearanceManager = overlayPanel?.appState?.menuBarManager.appearanceManager else {
+        guard let appearanceManager = overlayPanel?.appState?.appearanceManager else {
             return NSBezierPath()
         }
         var rect = rect
@@ -553,7 +558,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
             return CGRect(x: rect.minX, y: rect.minY, width: maxX, height: rect.height)
         }()
         let trailingPathBounds: CGRect = {
-            let items = MenuBarItem.getMenuBarItems(on: screen.displayID, using: .bridging, onScreenOnly: true, sortingBy: .orderInMenuBar)
+            let items = MenuBarItem.getMenuBarItems(on: screen.displayID, onScreenOnly: true, activeSpaceOnly: false)
             guard !items.isEmpty else {
                 return .zero
             }
@@ -576,18 +581,21 @@ private final class MenuBarOverlayPanelContentView: NSView {
             return shapePath(
                 in: rect,
                 leadingEndCap: info.leading.leadingEndCap,
-                trailingEndCap: info.trailing.trailingEndCap
+                trailingEndCap: info.trailing.trailingEndCap,
+                screen: screen
             )
         } else {
             let leadingPath = shapePath(
                 in: leadingPathBounds,
                 leadingEndCap: info.leading.leadingEndCap,
-                trailingEndCap: info.leading.trailingEndCap
+                trailingEndCap: info.leading.trailingEndCap,
+                screen: screen
             )
             let trailingPath = shapePath(
                 in: trailingPathBounds,
                 leadingEndCap: info.trailing.leadingEndCap,
-                trailingEndCap: info.trailing.trailingEndCap
+                trailingEndCap: info.trailing.trailingEndCap,
+                screen: screen
             )
             let path = NSBezierPath()
             path.append(leadingPath)

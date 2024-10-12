@@ -17,7 +17,7 @@ final class MenuBarItemManager: ObservableObject {
         /// All cached menu bar items.
         var allItems: [MenuBarItem] {
             MenuBarSection.Name.allCases.reduce(into: []) { result, section in
-                result.append(contentsOf: allItems(for: section))
+                result.append(contentsOf: self[section])
             }
         }
 
@@ -28,29 +28,14 @@ final class MenuBarItemManager: ObservableObject {
             }
         }
 
-        /// Appends the given item to the given section.
-        mutating func appendItem(_ item: MenuBarItem, to section: MenuBarSection.Name) {
-            items[section, default: []].append(item)
-        }
-
-        /// Clears the cached items for the given section.
-        mutating func clearItems(for section: MenuBarSection.Name) {
-            items[section, default: []].removeAll()
-        }
-
         /// Clears the cache.
         mutating func clear() {
             items.removeAll()
         }
 
-        /// Returns the cached menu bar items for the given section.
-        func allItems(for section: MenuBarSection.Name) -> [MenuBarItem] {
-            items[section, default: []]
-        }
-
         /// Returns the cached menu bar items managed by Ice for the given section.
         func managedItems(for section: MenuBarSection.Name) -> [MenuBarItem] {
-            allItems(for: section).filter { item in
+            self[section].filter { item in
                 // Filter out items that can't be hidden.
                 guard item.canBeHidden else {
                     return false
@@ -65,6 +50,20 @@ final class MenuBarItemManager: ObservableObject {
 
                 return true
             }
+        }
+
+        /// Returns the name of the section for the given menu bar item.
+        func section(for item: MenuBarItem) -> MenuBarSection.Name? {
+            for (section, items) in self.items where items.contains(where: { $0.info == item.info }) {
+                return section
+            }
+            return nil
+        }
+
+        /// Accesses the items in the given section.
+        subscript(section: MenuBarSection.Name) -> [MenuBarItem] {
+            get { items[section, default: []] }
+            set { items[section] = newValue }
         }
     }
 
@@ -116,8 +115,30 @@ final class MenuBarItemManager: ObservableObject {
     /// The last time an item was moved.
     private(set) var lastItemMoveStartDate: Date?
 
+    /// Counter to determine if a menu bar item, or group of menu bar
+    /// items is being moved.
+    private var itemMoveCount = 0
+
+    /// A Boolean value that indicates whether a mouse button is down.
+    private var isMouseButtonDown = false
+
     /// Counter for mouse movement.
     private var mouseMovedCount = 0
+
+    /// Event type mask for tracking mouse events.
+    private let mouseTrackingMask: NSEvent.EventTypeMask = [
+        .mouseMoved,
+        .leftMouseDown,
+        .rightMouseDown,
+        .otherMouseDown,
+        .leftMouseUp,
+        .rightMouseUp,
+        .otherMouseUp,
+    ]
+
+    /// A Boolean value that indicates whether a menu bar item, or group
+    /// of menu bar items is being moved.
+    var isMovingItem: Bool { itemMoveCount > 0 }
 
     /// Creates a manager with the given app state.
     init(appState: AppState) {
@@ -146,18 +167,39 @@ final class MenuBarItemManager: ObservableObject {
             }
             .store(in: &c)
 
+        NSWorkspace.shared.publisher(for: \.runningApplications)
+            .delay(for: 0.25, scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else {
+                    return
+                }
+                Task {
+                    await self.cacheItemsIfNeeded()
+                }
+            }
+            .store(in: &c)
+
         Publishers.Merge(
-            UniversalEventMonitor.publisher(for: .mouseMoved),
-            RunLoopLocalEventMonitor.publisher(for: .mouseMoved, mode: .eventTracking)
+            UniversalEventMonitor.publisher(for: mouseTrackingMask),
+            RunLoopLocalEventMonitor.publisher(for: mouseTrackingMask, mode: .eventTracking)
         )
         .removeDuplicates()
-        .sink { [weak self] _ in
+        .sink { [weak self] event in
             guard let self else {
                 return
             }
-            mouseMovedCount += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self.mouseMovedCount = max(self.mouseMovedCount - 1, 0)
+            switch event.type {
+            case .mouseMoved:
+                mouseMovedCount += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    self.mouseMovedCount = max(self.mouseMovedCount - 1, 0)
+                }
+            case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+                isMouseButtonDown = true
+            case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+                isMouseButtonDown = false
+            default:
+                break
             }
         }
         .store(in: &c)
@@ -169,87 +211,122 @@ final class MenuBarItemManager: ObservableObject {
 // MARK: - Cache Items
 
 extension MenuBarItemManager {
-    /// Caches the given menu bar items, without checking whether the control items are in the correct order.
+    /// Logs a warning that the given menu bar item was not added to the cache.
+    private func logNotCachedWarning(for item: MenuBarItem) {
+        Logger.itemManager.warning("\(item.logString) was not cached")
+    }
+
+    /// Logs a reason for skipping the cache.
+    private func logSkippingCache(reason: String) {
+        Logger.itemManager.debug("Skipping menu bar item cache as \(reason)")
+    }
+
+    /// Caches the given menu bar items, without checking whether the control
+    /// items are in the correct order.
     private func uncheckedCacheItems(
         hiddenControlItem: MenuBarItem,
         alwaysHiddenControlItem: MenuBarItem?,
         otherItems: [MenuBarItem]
     ) {
-        func logNotAddedWarning(for item: MenuBarItem) {
-            Logger.itemManager.warning("\(item.logString) doesn't seem to be in a section, so it wasn't cached")
-        }
-
         Logger.itemManager.debug("Caching menu bar items")
 
-        update(&itemCache) { cache in
-            cache.clear()
+        let predicates = Predicates.sectionPredicates(
+            hiddenControlItem: hiddenControlItem,
+            alwaysHiddenControlItem: alwaysHiddenControlItem
+        )
 
-            if let alwaysHiddenControlItem {
-                for item in otherItems {
-                    if item.frame.minX >= hiddenControlItem.frame.maxX {
-                        cache.appendItem(item, to: .visible)
-                    } else if
-                        item.frame.maxX <= hiddenControlItem.frame.minX,
-                        item.frame.minX >= alwaysHiddenControlItem.frame.maxX
+        var cache = ItemCache()
+        var tempShownItems = [(MenuBarItem, MoveDestination)]()
+
+        for item in otherItems {
+            if let context = tempShownItemContexts.first(where: { $0.info == item.info }) {
+                // Keep track of temporarily shown items and their return destinations separately.
+                // We want to cache them as if they were in their original locations. Once all other
+                // items are cached, use the return destinations to insert the items into the cache
+                // at the correct position.
+                tempShownItems.append((item, context.returnDestination))
+            } else if predicates.isInVisibleSection(item) {
+                cache[.visible].append(item)
+            } else if predicates.isInHiddenSection(item) {
+                cache[.hidden].append(item)
+            } else if predicates.isInAlwaysHiddenSection(item) {
+                cache[.alwaysHidden].append(item)
+            } else {
+                logNotCachedWarning(for: item)
+            }
+        }
+
+        for (item, destination) in tempShownItems {
+            switch destination {
+            case .leftOfItem(let targetItem):
+                switch targetItem.info {
+                case .hiddenControlItem:
+                    cache[.hidden].append(item)
+                case .alwaysHiddenControlItem:
+                    cache[.alwaysHidden].append(item)
+                default:
+                    if
+                        let section = cache.section(for: targetItem),
+                        let index = cache[section].firstIndex(of: targetItem.info)
                     {
-                        cache.appendItem(item, to: .hidden)
-                    } else if item.frame.maxX <= alwaysHiddenControlItem.frame.minX {
-                        cache.appendItem(item, to: .alwaysHidden)
-                    } else {
-                        logNotAddedWarning(for: item)
+                        let clampedIndex = index.clamped(to: cache[section].startIndex...cache[section].endIndex)
+                        cache[section].insert(item, at: clampedIndex)
                     }
                 }
-            } else {
-                for item in otherItems {
-                    if item.frame.minX >= hiddenControlItem.frame.maxX {
-                        cache.appendItem(item, to: .visible)
-                    } else if item.frame.maxX <= hiddenControlItem.frame.minX {
-                        cache.appendItem(item, to: .hidden)
-                    } else {
-                        logNotAddedWarning(for: item)
+            case .rightOfItem(let targetItem):
+                switch targetItem.info {
+                case .hiddenControlItem:
+                    cache[.visible].insert(item, at: 0)
+                case .alwaysHiddenControlItem:
+                    cache[.hidden].insert(item, at: 0)
+                default:
+                    if
+                        let section = cache.section(for: targetItem),
+                        let index = cache[section].firstIndex(of: targetItem.info)
+                    {
+                        let clampedIndex = (index - 1).clamped(to: cache[section].startIndex...cache[section].endIndex)
+                        cache[section].insert(item, at: clampedIndex)
                     }
                 }
             }
         }
+
+        itemCache = cache
     }
 
-    /// Caches the current menu bar items if needed, ensuring that the control items are in the correct order.
-    private func cacheItemsIfNeeded() async {
-        guard tempShownItemContexts.isEmpty else {
-            Logger.itemManager.debug("Skipping item cache as items are temporarily shown")
+    /// Caches the current menu bar items if needed, ensuring that the control
+    /// items are in the correct order.
+    func cacheItemsIfNeeded() async {
+        do {
+            try await waitForItemsToStopMoving(timeout: .seconds(1))
+        } catch is TaskTimeoutError {
+            logSkippingCache(reason: "an item is currently being moved")
             return
-        }
-
-        if let lastItemMoveStartDate {
-            guard Date.now.timeIntervalSince(lastItemMoveStartDate) > 3 else {
-                Logger.itemManager.debug("Skipping item cache as an item was recently moved")
-                return
+        } catch {
+            if let lastItemMoveStartDate {
+                guard Date.now.timeIntervalSince(lastItemMoveStartDate) > 1 else {
+                    logSkippingCache(reason: "an item was recently moved")
+                    return
+                }
             }
         }
 
         let itemWindowIDs = Bridging.getWindowList(option: [.menuBarItems, .activeSpace])
         if cachedItemWindowIDs == itemWindowIDs {
-            Logger.itemManager.debug("Skipping item cache as item windows have not changed")
+            logSkippingCache(reason: "item windows have not changed")
             return
         } else {
             cachedItemWindowIDs = itemWindowIDs
         }
 
-        var items = MenuBarItem.getMenuBarItemsPrivateAPI(
-            onScreenOnly: false,
-            activeSpaceOnly: true
-        )
+        var items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
 
-        let hiddenControlItem = items
-            .firstIndex { $0.info == .hiddenControlItem }
-            .map { items.remove(at: $0) }
-        let alwaysHiddenControlItem = items
-            .firstIndex { $0.info == .alwaysHiddenControlItem }
-            .map { items.remove(at: $0) }
+        let hiddenControlItem = items.firstIndex(of: .hiddenControlItem).map { items.remove(at: $0) }
+        let alwaysHiddenControlItem = items.firstIndex(of: .alwaysHiddenControlItem).map { items.remove(at: $0) }
 
         guard let hiddenControlItem else {
             Logger.itemManager.warning("Missing control item for hidden section")
-            Logger.itemManager.debug("Clearing item cache")
+            Logger.itemManager.debug("Clearing menu bar item cache")
             itemCache.clear()
             return
         }
@@ -268,7 +345,7 @@ extension MenuBarItemManager {
             )
         } catch {
             Logger.itemManager.error("Error enforcing control item order: \(error)")
-            Logger.itemManager.debug("Clearing item cache")
+            Logger.itemManager.debug("Clearing menu bar item cache")
             itemCache.clear()
         }
     }
@@ -804,6 +881,11 @@ extension MenuBarItemManager {
         _ item: MenuBarItem,
         to destination: MoveDestination
     ) async throws {
+        itemMoveCount += 1
+        defer {
+            itemMoveCount -= 1
+        }
+
         guard item.isMovable else {
             throw EventError(code: .notMovable, item: item)
         }
@@ -899,7 +981,7 @@ extension MenuBarItemManager {
         guard let appState else {
             throw EventError(code: .invalidAppState, item: item)
         }
-        guard let cursorLocation = MouseCursor.location(flipped: true) else {
+        guard let cursorLocation = MouseCursor.location(in: .coreGraphics) else {
             throw EventError(code: .invalidCursorLocation, item: item)
         }
         guard let initialFrame = getCurrentFrame(for: item) else {
@@ -949,6 +1031,10 @@ extension MenuBarItemManager {
     ///   - destination: A destination to move the menu bar item.
     ///   - timeout: Amount of time to wait before throwing an error.
     func slowMove(item: MenuBarItem, to destination: MoveDestination, timeout: Duration = .seconds(1)) async throws {
+        itemMoveCount += 1
+        defer {
+            itemMoveCount -= 1
+        }
         try await move(item: item, to: destination)
         let waitTask = Task(timeout: timeout) {
             while true {
@@ -964,6 +1050,19 @@ extension MenuBarItemManager {
             throw EventError(code: .otherTimeout, item: item)
         }
     }
+
+    /// Waits asynchronously for all menu bar items to stop moving.
+    ///
+    /// - Parameter timeout: Amount of time to wait before throwing an error.
+    func waitForItemsToStopMoving(timeout: Duration) async throws {
+        let isMovingItemCheckTask = Task(timeout: timeout) {
+            while await self.isMovingItem {
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        try await isMovingItemCheckTask.value
+    }
 }
 
 // MARK: - Click Items
@@ -978,7 +1077,7 @@ extension MenuBarItemManager {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw EventError(code: .invalidEventSource, item: item)
         }
-        guard let cursorLocation = MouseCursor.location(flipped: true) else {
+        guard let cursorLocation = MouseCursor.location(in: .coreGraphics) else {
             throw EventError(code: .invalidCursorLocation, item: item)
         }
         guard let currentFrame = getCurrentFrame(for: item) else {
@@ -1057,33 +1156,13 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Clicks the given menu bar item with the left mouse button.
-    func leftClick(item: MenuBarItem) async throws {
-        Logger.itemManager.info("Left clicking \(item.logString)")
+    /// Clicks the given menu bar item with the given mouse button.
+    func click(item: MenuBarItem, with mouseButton: CGMouseButton) async throws {
+        Logger.itemManager.info("Clicking \(item.logString) with \(mouseButton.logString)")
         try await click(
             item: item,
-            mouseDownButtonState: .leftMouseDown,
-            mouseUpButtonState: .leftMouseUp
-        )
-    }
-
-    /// Clicks the given menu bar item with the right mouse button.
-    func rightClick(item: MenuBarItem) async throws {
-        Logger.itemManager.info("Right clicking \(item.logString)")
-        try await click(
-            item: item,
-            mouseDownButtonState: .rightMouseDown,
-            mouseUpButtonState: .rightMouseUp
-        )
-    }
-
-    /// Clicks the given menu bar item with the center mouse button.
-    func centerClick(item: MenuBarItem) async throws {
-        Logger.itemManager.info("Center clicking \(item.logString)")
-        try await click(
-            item: item,
-            mouseDownButtonState: .otherMouseDown,
-            mouseUpButtonState: .otherMouseUp
+            mouseDownButtonState: mouseButton.downState,
+            mouseUpButtonState: mouseButton.upState
         )
     }
 }
@@ -1141,19 +1220,10 @@ extension MenuBarItemManager {
             let latest = MenuBarItem(windowID: item.windowID),
             latest.isOnScreen
         {
-            Task {
-                if clickWhenFinished {
+            if clickWhenFinished {
+                Task {
                     do {
-                        switch mouseButton {
-                        case .left:
-                            try await leftClick(item: latest)
-                        case .right:
-                            try await rightClick(item: latest)
-                        case .center:
-                            try await centerClick(item: latest)
-                        @unknown default:
-                            assertionFailure("Unknown mouse button \(mouseButton)")
-                        }
+                        try await click(item: latest, with: mouseButton)
                     } catch {
                         Logger.itemManager.error("ERROR: \(error)")
                     }
@@ -1173,7 +1243,7 @@ extension MenuBarItemManager {
 
         Logger.itemManager.info("Temporarily showing \(item.logString)")
 
-        var items = MenuBarItem.getMenuBarItemsPrivateAPI(onScreenOnly: false, activeSpaceOnly: true)
+        var items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
 
         guard let destination = getReturnDestination(for: item, in: items) else {
             Logger.itemManager.warning("No return destination for \(item.logString)")
@@ -1187,17 +1257,19 @@ extension MenuBarItemManager {
         // Remove all offscreen items.
         items.trimPrefix { !$0.isOnScreen }
 
-        if let rightArea = screen.auxiliaryTopRightArea {
-            // Remove items to the right of the notch until we have enough room to show this item.
-            items.trimPrefix { $0.frame.minX - item.frame.width <= rightArea.minX + 20 }
+        let maxX = if let rightArea = screen.auxiliaryTopRightArea {
+            max(rightArea.minX + 20, applicationMenuFrame.maxX)
         } else {
-            // Remove items to the right of the application menu frame until we have enough room
-            // to show this item.
-            items.trimPrefix { $0.frame.minX - item.frame.width <= applicationMenuFrame.maxX }
+            applicationMenuFrame.maxX
         }
 
+        // Remove items until we have enough room to show this item.
+        items.trimPrefix { $0.frame.minX - item.frame.width <= maxX }
+
         guard let targetItem = items.first else {
-            Logger.itemManager.warning("Not enough room to show \(item.logString)")
+            let alert = NSAlert()
+            alert.messageText = "Not enough room to show \"\(item.displayName)\""
+            alert.runModal()
             return
         }
 
@@ -1207,16 +1279,7 @@ extension MenuBarItemManager {
             if clickWhenFinished {
                 do {
                     try await slowMove(item: item, to: .leftOfItem(targetItem))
-                    switch mouseButton {
-                    case .left:
-                        try await leftClick(item: item)
-                    case .right:
-                        try await rightClick(item: item)
-                    case .center:
-                        try await centerClick(item: item)
-                    @unknown default:
-                        assertionFailure("Unknown mouse button \(mouseButton)")
-                    }
+                    try await click(item: item, with: mouseButton)
                 } catch {
                     Logger.itemManager.error("ERROR: \(error)")
                 }
@@ -1251,34 +1314,34 @@ extension MenuBarItemManager {
 
     /// Rehides all temporarily shown items.
     ///
-    /// If an item is currently showing its menu, this method waits for the menu
-    /// to close before hiding the items.
+    /// If an item is currently showing its interface, this method waits for the
+    /// interface to close before hiding the items.
     func rehideTempShownItems() async {
+        itemMoveCount += 1
+        defer {
+            itemMoveCount -= 1
+        }
+
         guard !tempShownItemContexts.isEmpty else {
             return
         }
 
-        let interfaceCheckTask = Task(timeout: .seconds(1)) {
-            while await self.tempShownItemContexts.contains(where: { $0.isShowingInterface }) {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(100))
-            }
-        }
-        do {
-            try await interfaceCheckTask.value
-        } catch is TaskTimeoutError {
-            Logger.itemManager.debug("Menu check task timed out, switching to timer")
+        guard !isMouseButtonDown else {
+            Logger.itemManager.debug("Mouse button is down, so waiting to rehide")
             runTempShownItemTimer(for: 3)
             return
-        } catch {
-            Logger.itemManager.error("ERROR: \(error)")
+        }
+        guard !tempShownItemContexts.contains(where: { $0.isShowingInterface }) else {
+            Logger.itemManager.debug("Menu bar item interface is shown, so waiting to rehide")
+            runTempShownItemTimer(for: 3)
+            return
         }
 
         Logger.itemManager.info("Rehiding temporarily shown items")
 
         var failedContexts = [TempShownItemContext]()
 
-        let items = MenuBarItem.getMenuBarItemsPrivateAPI(onScreenOnly: false, activeSpaceOnly: true)
+        let items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
 
         while let context = tempShownItemContexts.popLast() {
             guard let item = items.first(where: { $0.info == context.info }) else {
@@ -1297,6 +1360,7 @@ extension MenuBarItemManager {
             tempShownItemsTimer = nil
         } else {
             tempShownItemContexts = failedContexts
+            Logger.itemManager.warning("Some items failed to rehide")
             runTempShownItemTimer(for: 3)
         }
     }
@@ -1324,12 +1388,9 @@ extension MenuBarItemManager {
         hiddenControlItem: MenuBarItem,
         alwaysHiddenControlItem: MenuBarItem
     ) async throws {
-        switch NSApp.currentEvent?.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+        guard !isMouseButtonDown else {
             Logger.itemManager.debug("Mouse button is down, so will not enforce control item order")
             return
-        default:
-            break
         }
         guard mouseMovedCount <= 0 else {
             Logger.itemManager.debug("Mouse has recently moved, so will not enforce control item order")
@@ -1464,6 +1525,48 @@ private extension CGEventType {
         case .tapDisabledByTimeout: "tapDisabledByTimeout event"
         case .tapDisabledByUserInput: "tapDisabledByUserInput event"
         @unknown default: "unknown event"
+        }
+    }
+}
+
+// MARK: - CGMouseButton Helpers
+
+private extension CGMouseButton {
+    /// A string to use for logging purposes.
+    var logString: String {
+        switch self {
+        case .left: "left mouse button"
+        case .right: "right mouse button"
+        case .center: "center mouse button"
+        @unknown default: "unknown mouse button"
+        }
+    }
+
+    /// The menu bar item event state for when this mouse button is down.
+    var downState: CGEvent.MenuBarItemEventButtonState {
+        switch self {
+        case .left:
+            return .leftMouseDown
+        case .right:
+            return .rightMouseDown
+        case .center:
+            return .otherMouseDown
+        @unknown default:
+            fatalError("Unknown mouse button \(rawValue)")
+        }
+    }
+
+    /// The menu bar item event state for when this mouse button is up.
+    var upState: CGEvent.MenuBarItemEventButtonState {
+        switch self {
+        case .left:
+            return .leftMouseUp
+        case .right:
+            return .rightMouseUp
+        case .center:
+            return .otherMouseUp
+        @unknown default:
+            fatalError("Unknown mouse button \(rawValue)")
         }
     }
 }

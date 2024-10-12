@@ -7,21 +7,29 @@ import Combine
 import Ifrit
 import SwiftUI
 
+/// A panel that contains the menu bar search interface.
 final class MenuBarSearchPanel: NSPanel {
+    /// The default screen to show the panel on.
     static var defaultScreen: NSScreen? {
         NSScreen.screenWithMouse ?? NSScreen.main
     }
 
+    /// The shared app state.
     private weak var appState: AppState?
 
+    /// Monitor for mouse down events.
     private var mouseDownMonitor: UniversalEventMonitor?
 
+    /// Monitor for key down events.
     private var keyDownMonitor: UniversalEventMonitor?
 
+    /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
+    /// Overridden to always be `true`.
     override var canBecomeKey: Bool { true }
 
+    /// Creates a menu bar search panel with the given app state.
     init(appState: AppState) {
         super.init(
             contentRect: .zero,
@@ -37,6 +45,7 @@ final class MenuBarSearchPanel: NSPanel {
         configureCancellables()
     }
 
+    /// Configures the internal observers for the panel.
     private func configureCancellables() {
         var c = Set<AnyCancellable>()
 
@@ -46,8 +55,7 @@ final class MenuBarSearchPanel: NSPanel {
             }
             .store(in: &c)
 
-        // close the panel when the active space changes, or when the
-        // screen parameters change
+        // Close the panel when the active space changes, or when the screen parameters change.
         Publishers.Merge(
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification),
             NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
@@ -60,16 +68,17 @@ final class MenuBarSearchPanel: NSPanel {
         cancellables = c
     }
 
+    /// Shows the panel on the given screen.
     func show(on screen: NSScreen) async {
         guard let appState else {
             return
         }
 
-        // Set the desired frame size for the panel before positioning
+        // Set the desired frame size for the panel before positioning.
         let panelSize = CGSize(width: 600, height: 400)
         setFrame(NSRect(origin: .zero, size: panelSize), display: false)
 
-        // Important that we set the navigation before updating the cache
+        // Important that we set the navigation before updating the cache.
         appState.navigationState.isSearchPresented = true
 
         await appState.imageCache.updateCache()
@@ -86,12 +95,9 @@ final class MenuBarSearchPanel: NSPanel {
             else {
                 return event
             }
-            if let lastItemMoveStartDate = appState.itemManager.lastItemMoveStartDate {
-                guard Date.now.timeIntervalSince(lastItemMoveStartDate) > 1 else {
-                    return event
-                }
+            if !appState.itemManager.isMovingItem {
+                close()
             }
-            close()
             return event
         }
         keyDownMonitor = UniversalEventMonitor(mask: .keyDown) { [weak self] event in
@@ -105,7 +111,7 @@ final class MenuBarSearchPanel: NSPanel {
         mouseDownMonitor?.start()
         keyDownMonitor?.start()
 
-        // Calculate the top-left position
+        // Calculate the top left position.
         let topLeft = CGPoint(
             x: screen.frame.midX - frame.width / 2,
             y: screen.frame.midY + (frame.height / 2) + (screen.frame.height / 8)
@@ -115,6 +121,7 @@ final class MenuBarSearchPanel: NSPanel {
         makeKeyAndOrderFront(nil)
     }
 
+    /// Toggles the panel's visibility.
     func toggle() async {
         if isVisible {
             close()
@@ -123,6 +130,7 @@ final class MenuBarSearchPanel: NSPanel {
         }
     }
 
+    /// Dismisses the panel and disables its event monitors.
     override func close() {
         super.close()
         contentView = nil
@@ -210,14 +218,13 @@ private struct MenuBarSearchContentView: View {
 
                 Spacer()
 
-                ShowItemButton {
-                    guard
-                        let selection,
-                        let item = menuBarItem(for: selection)
-                    else {
-                        return
+                if
+                    let selection,
+                    let item = menuBarItem(for: selection)
+                {
+                    ShowItemButton(item: item) {
+                        performAction(for: item)
                     }
-                    performAction(for: item)
                 }
             }
             .padding(5)
@@ -248,13 +255,13 @@ private struct MenuBarSearchContentView: View {
     private func updateDisplayedItems() {
         let searchItems: [(listItem: ListItem, title: String)] = MenuBarSection.Name.allCases.reduce(into: []) { items, section in
             let headerItem = ListItem.header(id: .header(section)) {
-                Text(section.menuString)
+                Text(section.displayString)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
             }
-            items.append((headerItem, section.menuString))
+            items.append((headerItem, section.displayString))
 
             for item in itemManager.itemCache.managedItems(for: section).reversed() {
                 let listItem = ListItem.item(id: .item(item.info)) {
@@ -291,12 +298,17 @@ private struct MenuBarSearchContentView: View {
 
     private func performAction(for item: MenuBarItem) {
         closePanel()
-        itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .left)
+        Task {
+            try await Task.sleep(for: .milliseconds(25))
+            itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .left)
+        }
     }
 }
 
 private struct BottomBarButton<Content: View>: View {
+    @State private var frame = CGRect.zero
     @State private var isHovering = false
+    @State private var isPressed = false
 
     let content: Content
     let action: () -> Void
@@ -312,15 +324,25 @@ private struct BottomBarButton<Content: View>: View {
             .background {
                 VisualEffectView(material: .selection, blendingMode: .withinWindow)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .circular))
-                    .opacity(isHovering ? 0.25 : 0)
+                    .opacity(isPressed ? 0.5 : isHovering ? 0.25 : 0)
             }
             .contentShape(Rectangle())
             .onHover { hovering in
                 isHovering = hovering
             }
-            .onTapGesture {
-                action()
-            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        isPressed = frame.contains(value.location)
+                    }
+                    .onEnded { value in
+                        isPressed = false
+                        if frame.contains(value.location) {
+                            action()
+                        }
+                    }
+            )
+            .onFrameChange(update: $frame)
     }
 }
 
@@ -340,14 +362,13 @@ private struct SettingsButton: View {
 }
 
 private struct ShowItemButton: View {
-    @State private var isHovering = false
-
+    let item: MenuBarItem
     let action: () -> Void
 
     var body: some View {
         BottomBarButton(action: action) {
             HStack {
-                Text("Show item")
+                Text(item.isOnScreen ? "Click item" : "Show item")
                     .padding(.horizontal, 5)
 
                 Image(systemName: "return")

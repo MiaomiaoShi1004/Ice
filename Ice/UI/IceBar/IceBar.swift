@@ -117,7 +117,7 @@ final class IceBarPanel: NSPanel {
                 }
                 return getOrigin(for: .iceIcon)
             case .mousePointer:
-                guard let location = MouseCursor.location(flipped: false) else {
+                guard let location = MouseCursor.location(in: .appKit) else {
                     return getOrigin(for: .iceIcon)
                 }
 
@@ -160,6 +160,7 @@ final class IceBarPanel: NSPanel {
         appState.navigationState.isIceBarPresented = true
         currentSection = section
 
+        await appState.itemManager.cacheItemsIfNeeded()
         await appState.imageCache.updateCache()
 
         contentView = IceBarHostingView(appState: appState, colorManager: colorManager, section: section) { [weak self] in
@@ -243,7 +244,7 @@ private struct IceBarContentView: View {
     }
 
     private var configuration: MenuBarAppearanceConfiguration {
-        menuBarManager.appearanceManager.configuration
+        appState.appearanceManager.configuration
     }
 
     private var horizontalPadding: CGFloat {
@@ -264,7 +265,7 @@ private struct IceBarContentView: View {
             return nil
         }
         if configuration.shapeKind != .none && configuration.isInset && imageCache.screen?.hasNotch == true {
-            return menuBarHeight - menuBarManager.appearanceManager.menuBarInsetAmount * 2
+            return menuBarHeight - appState.appearanceManager.menuBarInsetAmount * 2
         }
         return menuBarHeight
     }
@@ -273,7 +274,7 @@ private struct IceBarContentView: View {
         if configuration.hasRoundedShape {
             AnyInsettableShape(Capsule())
         } else {
-            AnyInsettableShape(RoundedRectangle(cornerRadius: frame.height / 7, style: .circular))
+            AnyInsettableShape(RoundedRectangle(cornerRadius: frame.height / 5, style: .continuous))
         }
     }
 
@@ -342,7 +343,10 @@ private struct IceBarItemView: View {
                 return
             }
             closePanel()
-            itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .left)
+            Task {
+                try await Task.sleep(for: .milliseconds(25))
+                itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .left)
+            }
         }
     }
 
@@ -352,7 +356,10 @@ private struct IceBarItemView: View {
                 return
             }
             closePanel()
-            itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .right)
+            Task {
+                try await Task.sleep(for: .milliseconds(25))
+                itemManager.tempShowItem(item, clickWhenFinished: true, mouseButton: .right)
+            }
         }
     }
 

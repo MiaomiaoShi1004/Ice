@@ -12,8 +12,7 @@ struct IceApp: App {
 
     init() {
         NSSplitViewItem.swizzle()
-        IceBarPanel.swizzle()
-        MigrationManager(appState: appState).migrateAll()
+        MigrationManager.migrateAll(appState: appState)
         appDelegate.assignAppState(appState)
     }
 

@@ -42,19 +42,19 @@ final class MenuBarItemImageCache: ObservableObject {
         if let appState {
             Publishers.Merge3(
                 // Update every 3 seconds at minimum.
-                Timer.publish(every: 3, on: .main, in: .default).autoconnect().replace(with: ()),
+                Timer.publish(every: 3, on: .main, in: .default).autoconnect().mapToVoid(),
 
                 // Update when the active space or screen parameters change.
                 Publishers.Merge(
                     NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification),
                     NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
                 )
-                .replace(with: ()),
+                .mapToVoid(),
 
                 // Update when the average menu bar color or cached items change.
                 Publishers.Merge(
-                    appState.menuBarManager.$averageColorInfo.removeDuplicates().replace(with: ()),
-                    appState.itemManager.$itemCache.removeDuplicates().replace(with: ())
+                    appState.menuBarManager.$averageColorInfo.removeDuplicates().mapToVoid(),
+                    appState.itemManager.$itemCache.removeDuplicates().mapToVoid()
                 )
             )
             .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: false)
@@ -72,11 +72,16 @@ final class MenuBarItemImageCache: ObservableObject {
         cancellables = c
     }
 
+    /// Logs a reason for skipping the cache.
+    private func logSkippingCache(reason: String) {
+        Logger.imageCache.debug("Skipping menu bar item image cache as \(reason)")
+    }
+
     /// Returns a Boolean value that indicates whether caching menu bar items failed for
     /// the given section.
     @MainActor
     func cacheFailed(for section: MenuBarSection.Name) -> Bool {
-        let items = appState?.itemManager.itemCache.allItems(for: section) ?? []
+        let items = appState?.itemManager.itemCache[section] ?? []
         guard !items.isEmpty else {
             return false
         }
@@ -94,7 +99,7 @@ final class MenuBarItemImageCache: ObservableObject {
             return [:]
         }
 
-        let items = await appState.itemManager.itemCache.allItems(for: section)
+        let items = await appState.itemManager.itemCache[section]
 
         var images = [MenuBarItemInfo: CGImage]()
         let backingScaleFactor = screen.backingScaleFactor
@@ -199,7 +204,7 @@ final class MenuBarItemImageCache: ObservableObject {
         let context = Context()
 
         for section in sections {
-            guard await !appState.itemManager.itemCache.allItems(for: section).isEmpty else {
+            guard await !appState.itemManager.itemCache[section].isEmpty else {
                 continue
             }
             let sectionImages = await createImages(for: section, screen: screen)
@@ -231,22 +236,27 @@ final class MenuBarItemImageCache: ObservableObject {
 
         if !isIceBarPresented && !isSearchPresented {
             guard await appState.navigationState.isAppFrontmost else {
-                Logger.imageCache.debug("Skipping image cache as Ice Bar not visible, app not frontmost")
+                logSkippingCache(reason: "Ice Bar not visible, app not frontmost")
                 return
             }
             guard await appState.navigationState.isSettingsPresented else {
-                Logger.imageCache.debug("Skipping image cache as Ice Bar not visible, Settings not visible")
+                logSkippingCache(reason: "Ice Bar not visible, Settings not visible")
                 return
             }
             guard case .menuBarLayout = await appState.navigationState.settingsNavigationIdentifier else {
-                Logger.imageCache.debug("Skipping image cache as Ice Bar not visible, Settings visible but not on Menu Bar Layout pane")
+                logSkippingCache(reason: "Ice Bar not visible, Settings visible but not on Menu Bar Layout")
                 return
             }
         }
 
+        guard await !appState.itemManager.isMovingItem else {
+            logSkippingCache(reason: "an item is currently being moved")
+            return
+        }
+
         if let lastItemMoveStartDate = await appState.itemManager.lastItemMoveStartDate {
-            guard Date.now.timeIntervalSince(lastItemMoveStartDate) > 3 else {
-                Logger.imageCache.debug("Skipping image cache as an item was recently moved")
+            guard Date.now.timeIntervalSince(lastItemMoveStartDate) > 1 else {
+                logSkippingCache(reason: "an item was recently moved")
                 return
             }
         }

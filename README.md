@@ -5,7 +5,7 @@
 
 Ice is a powerful menu bar management tool. While its primary function is hiding and showing menu bar items, it aims to cover a wide variety of additional features to make it one of the most versatile menu bar tools available.
 
-![Banner](https://github.com/user-attachments/assets/9fa8c0a2-9ef4-491f-80e6-5d7d33b8d818)
+![Banner](https://github.com/user-attachments/assets/4423085c-4e4b-4f3d-ad0f-90a217c03470)
 
 [![Download](https://img.shields.io/badge/download-latest-brightgreen?style=flat-square)](https://github.com/jordanbaird/Ice/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
@@ -49,8 +49,9 @@ brew install jordanbaird-ice
 - [x] Drag and drop interface to arrange individual menu bar items
 - [x] Display hidden menu bar items in a separate bar (e.g. for MacBooks with the notch)
 - [x] Search menu bar items
-- [x] Custom menu bar item spacing
+- [x] Menu bar item spacing (BETA)
 - [ ] Profiles for menu bar layout
+- [ ] Individual spacer items
 - [ ] Menu bar item groups
 - [ ] Show menu bar items when trigger conditions are met
 
@@ -62,14 +63,17 @@ brew install jordanbaird-ice
 - [x] Custom menu bar shapes (rounded and/or split)
 - [ ] Remove background behind menu bar
 - [ ] Rounded screen corners
+- [ ] Different settings for light/dark mode
 
 ### Hotkeys
 
 - [x] Toggle individual menu bar sections
-- [x] Toggle application menus
+- [x] Show the search panel
+- [x] Enable/disable the Ice Bar
 - [x] Show/hide section divider icons
-- [ ] Temporarily show individual menu bar items
+- [x] Toggle application menus
 - [ ] Enable/disable auto rehide
+- [ ] Temporarily show individual menu bar items
 
 ### Other
 
@@ -83,29 +87,25 @@ Ice uses a number of system APIs that are available starting in macOS 14. As suc
 
 ## Gallery
 
-#### Arrange menu bar items in settings
-
-![Arrange Menu Bar Items](https://github.com/user-attachments/assets/c2f4a3e2-f58e-45a0-b648-5f0af8fb84c0)
-
 #### Show hidden menu bar items below the menu bar
 
 ![Ice Bar](https://github.com/user-attachments/assets/f1429589-6186-4e1b-8aef-592219d49b9b)
+
+#### Drag-and-drop interface to arrange menu bar items
+
+![Menu Bar Layout](https://github.com/user-attachments/assets/095442ba-f2d0-4bb4-9632-91e26ef8d45b)
 
 #### Customize the menu bar's appearance
 
 ![Menu Bar Appearance](https://github.com/user-attachments/assets/8c22c185-c3d2-49bb-971e-e1fc17df04b3)
 
-#### Choose your own icon to show in the menu bar
-
-![Custom Icon](https://github.com/user-attachments/assets/2f3668c1-9b48-46de-98e7-74bf9ff4fcce)
-
 #### Menu bar item search
 
-![Menu Bar Item Search](https://github.com/user-attachments/assets/ceca6fc6-4695-4a5c-ad64-3d92ce0dc234)
+![Menu Bar Item Search](https://github.com/user-attachments/assets/d1a7df3a-4989-4077-a0b1-8e7d5a1ba5b8)
 
 #### Custom menu bar item spacing
 
-![Custom Menu Bar Item Spacing](https://github.com/user-attachments/assets/b196aa7e-184a-4d4c-b040-502f4aae40a6)
+![Menu Bar Item Spacing](https://github.com/user-attachments/assets/b196aa7e-184a-4d4c-b040-502f4aae40a6)
 
 ## License
 

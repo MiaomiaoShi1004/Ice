@@ -9,12 +9,15 @@ import Combine
 /// Manager for the various event monitors maintained by the app.
 @MainActor
 final class EventManager {
+    /// The shared app state.
     private weak var appState: AppState?
 
+    /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: Monitors
 
+    /// Monitor for mouse down events.
     private(set) lazy var mouseDownMonitor = UniversalEventMonitor(
         mask: [.leftMouseDown, .rightMouseDown]
     ) { [weak self] event in
@@ -34,6 +37,7 @@ final class EventManager {
         return event
     }
 
+    /// Monitor for mouse up events.
     private(set) lazy var mouseUpMonitor = UniversalEventMonitor(
         mask: .leftMouseUp
     ) { [weak self] event in
@@ -41,6 +45,7 @@ final class EventManager {
         return event
     }
 
+    /// Monitor for mouse dragged events.
     private(set) lazy var mouseDraggedMonitor = UniversalEventMonitor(
         mask: .leftMouseDragged
     ) { [weak self] event in
@@ -48,6 +53,7 @@ final class EventManager {
         return event
     }
 
+    /// Monitor for mouse moved events.
     private(set) lazy var mouseMovedMonitor = UniversalEventMonitor(
         mask: .mouseMoved
     ) { [weak self] event in
@@ -55,6 +61,7 @@ final class EventManager {
         return event
     }
 
+    /// Monitor for scroll wheel events.
     private(set) lazy var scrollWheelMonitor = UniversalEventMonitor(
         mask: .scrollWheel
     ) { [weak self] event in
@@ -64,6 +71,7 @@ final class EventManager {
 
     // MARK: All Monitors
 
+    /// All monitors maintained by the app.
     private lazy var allMonitors = [
         mouseDownMonitor,
         mouseUpMonitor,
@@ -74,24 +82,26 @@ final class EventManager {
 
     // MARK: Initializers
 
+    /// Creates an event manager with the given app state.
     init(appState: AppState) {
         self.appState = appState
     }
 
+    /// Sets up the manager.
     func performSetup() {
         startAll()
         configureCancellables()
     }
 
+    /// Configures the internal observers for the manager.
     private func configureCancellables() {
         var c = Set<AnyCancellable>()
 
         if let appState {
             if let hiddenSection = appState.menuBarManager.section(withName: .hidden) {
-                // In fullscreen mode, the menu bar slides down from the top on hover.
-                // Observe the frame of the hidden section's control item, which we know
-                // will always be in the menu bar, and run the show-on-hover check when
-                // it changes.
+                // In fullscreen mode, the menu bar slides down from the top on hover. Observe
+                // the frame of the hidden section's control item, which we know will always be
+                // in the menu bar, and run the show-on-hover check when it changes.
                 Publishers.CombineLatest(
                     hiddenSection.controlItem.$windowFrame,
                     appState.$isActiveSpaceFullscreen
@@ -146,7 +156,7 @@ extension EventManager {
 
         Task {
             // Short delay helps the toggle action feel more natural.
-            try await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(50))
 
             if NSEvent.modifierFlags == .control {
                 handleShowRightClickMenu()
@@ -188,7 +198,7 @@ extension EventManager {
         }
 
         // Only continue if a section is currently visible.
-        guard let shownSection = appState.menuBarManager.shownSection else {
+        guard appState.menuBarManager.sections.contains(where: { !$0.isHidden }) else {
             return
         }
 
@@ -198,45 +208,45 @@ extension EventManager {
         }
 
         Task {
-            do {
-                let initialSpaceID = Bridging.activeSpaceID
+            let initialSpaceID = Bridging.activeSpaceID
 
-                // Sleep for a bit to give the window under the mouse a chance to focus.
-                try await Task.sleep(for: .seconds(0.25))
+            // Sleep for a bit to give the window under the mouse a chance to focus.
+            try? await Task.sleep(for: .seconds(0.25))
 
-                // If clicking caused a space change, don't bother with the window check.
-                if Bridging.activeSpaceID != initialSpaceID {
-                    shownSection.hide()
-                    return
+            // If clicking caused a space change, don't bother with the window check.
+            if Bridging.activeSpaceID != initialSpaceID {
+                for section in appState.menuBarManager.sections {
+                    section.hide()
                 }
+                return
+            }
 
-                // Get the window that the user has clicked into.
+            // Get the window that the user has clicked into.
+            guard
+                let mouseLocation = MouseCursor.location(in: .coreGraphics),
+                let windowUnderMouse = WindowInfo.getOnScreenWindows(excludeDesktopWindows: false)
+                    .filter({ $0.layer < CGWindowLevelForKey(.cursorWindow) })
+                    .first(where: { $0.frame.contains(mouseLocation) && $0.title?.isEmpty == false }),
+                let owningApplication = windowUnderMouse.owningApplication
+            else {
+                return
+            }
+
+            // The dock is an exception to the following check.
+            if owningApplication.bundleIdentifier != "com.apple.dock" {
+                // Only continue if the user has clicked into an active window with
+                // a regular activation policy.
                 guard
-                    let mouseLocation = MouseCursor.location(flipped: true),
-                    let windowUnderMouse = WindowInfo.getOnScreenWindows(excludeDesktopWindows: false)
-                        .filter({ $0.layer < CGWindowLevelForKey(.cursorWindow) })
-                        .first(where: { $0.frame.contains(mouseLocation) }),
-                    let owningApplication = windowUnderMouse.owningApplication
+                    owningApplication.isActive,
+                    owningApplication.activationPolicy == .regular
                 else {
                     return
                 }
+            }
 
-                // The dock is an exception to the following check.
-                if owningApplication.bundleIdentifier != "com.apple.dock" {
-                    // Only continue if the user has clicked into an active window with
-                    // a regular activation policy.
-                    guard
-                        owningApplication.isActive,
-                        owningApplication.activationPolicy == .regular
-                    else {
-                        return
-                    }
-                }
-
-                // If all the above checks have passed, hide.
-                shownSection.hide()
-            } catch {
-                Logger.eventManager.error("ERROR: \(error)")
+            // If all the above checks have passed, hide all sections.
+            for section in appState.menuBarManager.sections {
+                section.hide()
             }
         }
     }
@@ -247,7 +257,7 @@ extension EventManager {
         guard
             let appState,
             isMouseInsideEmptyMenuBarSpace,
-            let mouseLocation = MouseCursor.location(flipped: false)
+            let mouseLocation = MouseCursor.location(in: .appKit)
         else {
             return
         }
@@ -294,7 +304,7 @@ extension EventManager {
     // MARK: Handle Left Mouse Up
 
     private func handleLeftMouseUp() {
-        guard let appearanceManager = appState?.menuBarManager.appearanceManager else {
+        guard let appearanceManager = appState?.appearanceManager else {
             return
         }
         appearanceManager.setIsDraggingMenuBarItem(false)
@@ -312,7 +322,12 @@ extension EventManager {
         }
 
         // Notify each overlay panel that a menu bar item is being dragged.
-        appState.menuBarManager.appearanceManager.setIsDraggingMenuBarItem(true)
+        appState.appearanceManager.setIsDraggingMenuBarItem(true)
+
+        // Don't continue if the setting to show the sections is disabled.
+        guard appState.settingsManager.advancedSettingsManager.showAllSectionsOnUserDrag else {
+            return
+        }
 
         // Show all items, including section dividers.
         for section in appState.menuBarManager.sections {
@@ -350,36 +365,32 @@ extension EventManager {
         let delay = appState.settingsManager.advancedSettingsManager.showOnHoverDelay
 
         Task {
-            do {
-                if hiddenSection.isHidden {
-                    guard self.isMouseInsideEmptyMenuBarSpace else {
-                        return
-                    }
-                    try await Task.sleep(for: .seconds(delay))
-                    // Make sure the mouse is still inside.
-                    guard self.isMouseInsideEmptyMenuBarSpace else {
-                        return
-                    }
-                    hiddenSection.show()
-                } else {
-                    guard
-                        !self.isMouseInsideMenuBar,
-                        !self.isMouseInsideIceBar
-                    else {
-                        return
-                    }
-                    try await Task.sleep(for: .seconds(delay))
-                    // Make sure the mouse is still outside.
-                    guard
-                        !self.isMouseInsideMenuBar,
-                        !self.isMouseInsideIceBar
-                    else {
-                        return
-                    }
-                    hiddenSection.hide()
+            if hiddenSection.isHidden {
+                guard self.isMouseInsideEmptyMenuBarSpace else {
+                    return
                 }
-            } catch {
-                Logger.eventManager.error("ERROR: \(error)")
+                try? await Task.sleep(for: .seconds(delay))
+                // Make sure the mouse is still inside.
+                guard self.isMouseInsideEmptyMenuBarSpace else {
+                    return
+                }
+                hiddenSection.show()
+            } else {
+                guard
+                    !self.isMouseInsideMenuBar,
+                    !self.isMouseInsideIceBar
+                else {
+                    return
+                }
+                try? await Task.sleep(for: .seconds(delay))
+                // Make sure the mouse is still outside.
+                guard
+                    !self.isMouseInsideMenuBar,
+                    !self.isMouseInsideIceBar
+                else {
+                    return
+                }
+                hiddenSection.hide()
             }
         }
     }
@@ -442,12 +453,12 @@ extension EventManager {
         }
         if appState.menuBarManager.isMenuBarHiddenBySystem || appState.isActiveSpaceFullscreen {
             if
-                let mouseLocation = MouseCursor.location(flipped: true),
+                let mouseLocation = MouseCursor.location(in: .coreGraphics),
                 let menuBarWindow = WindowInfo.getMenuBarWindow(for: screen.displayID)
             {
                 return menuBarWindow.frame.contains(mouseLocation)
             }
-        } else if let mouseLocation = MouseCursor.location(flipped: false) {
+        } else if let mouseLocation = MouseCursor.location(in: .appKit) {
             return mouseLocation.y > screen.visibleFrame.maxY && mouseLocation.y <= screen.frame.maxY
         }
         return false
@@ -457,7 +468,7 @@ extension EventManager {
     /// the bounds of the current application menu.
     var isMouseInsideApplicationMenu: Bool {
         guard
-            let mouseLocation = MouseCursor.location(flipped: true),
+            let mouseLocation = MouseCursor.location(in: .coreGraphics),
             let screen = bestScreen,
             let appState,
             var applicationMenuFrame = appState.menuBarManager.getApplicationMenuFrame(for: screen.displayID)
@@ -474,11 +485,11 @@ extension EventManager {
     var isMouseInsideMenuBarItem: Bool {
         guard
             let screen = bestScreen,
-            let mouseLocation = MouseCursor.location(flipped: true)
+            let mouseLocation = MouseCursor.location(in: .coreGraphics)
         else {
             return false
         }
-        let menuBarItems = MenuBarItem.getMenuBarItems(on: screen.displayID, using: .bridging, onScreenOnly: true, sortingBy: .orderInMenuBar)
+        let menuBarItems = MenuBarItem.getMenuBarItems(on: screen.displayID, onScreenOnly: true, activeSpaceOnly: true)
         return menuBarItems.contains { $0.frame.contains(mouseLocation) }
     }
 
@@ -490,7 +501,7 @@ extension EventManager {
     var isMouseInsideNotch: Bool {
         guard
             let screen = bestScreen,
-            let mouseLocation = MouseCursor.location(flipped: false),
+            let mouseLocation = MouseCursor.location(in: .appKit),
             let frameOfNotch = screen.frameOfNotch
         else {
             return false
@@ -512,7 +523,7 @@ extension EventManager {
     var isMouseInsideIceBar: Bool {
         guard
             let appState,
-            let mouseLocation = MouseCursor.location(flipped: false)
+            let mouseLocation = MouseCursor.location(in: .appKit)
         else {
             return false
         }
@@ -530,7 +541,7 @@ extension EventManager {
             let appState,
             let visibleSection = appState.menuBarManager.section(withName: .visible),
             let iceIconFrame = visibleSection.controlItem.windowFrame,
-            let mouseLocation = MouseCursor.location(flipped: false)
+            let mouseLocation = MouseCursor.location(in: .appKit)
         else {
             return false
         }
